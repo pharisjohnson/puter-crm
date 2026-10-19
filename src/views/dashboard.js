@@ -1,6 +1,6 @@
 import { el, clear, append, keepingFocus } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { store } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
 import {
   weightedPipeline, pipelineValue, wonInMonth, winRate, stageSummary, isTerminalStage,
   stalledDeals, daysInStage, goalProgress,
@@ -61,10 +61,10 @@ export function dashboardView() {
 
   function render() {
     clear(body);
-    const { currency, stageProbabilities: overrides } = store.settings;
-    const stageList = store.stages();
+    const { currency, stageProbabilities: overrides } = teamStore.settings;
+    const stageList = teamStore.stages();
 
-    const hasAnything = store.deals.length || store.contacts.length || store.companies.length;
+    const hasAnything = teamStore.deals.length || teamStore.contacts.length || teamStore.companies.length;
     if (!hasAnything) {
       body.append(emptyState({
         icon: 'dashboard',
@@ -80,40 +80,40 @@ export function dashboardView() {
 
     const today = todayISO();
     const thisMonth = monthKey();
-    const open = store.deals.filter((d) => !isTerminalStage(d.stage));
+    const open = teamStore.deals.filter((d) => !isTerminalStage(d.stage));
     const prevMonth = shiftMonthKey(thisMonth, -1);
-    const wonNow = wonInMonth(store.deals, thisMonth);
-    const wonPrev = wonInMonth(store.deals, prevMonth);
-    const rate = winRate(store.deals);
-    const goal = goalProgress(store.deals, store.settings.revenueGoal, thisMonth);
+    const wonNow = wonInMonth(teamStore.deals, thisMonth);
+    const wonPrev = wonInMonth(teamStore.deals, prevMonth);
+    const rate = winRate(teamStore.deals);
+    const goal = goalProgress(teamStore.deals, teamStore.settings.revenueGoal, thisMonth);
     /* Recurring revenue: committed MRR from won contracts still inside
        their term, plus what is still in play. The tile only appears once
        there is a subscription to report - a book of one-time deals has
        nothing to say here and doesn't need a fifth empty number. */
-    const recurring = recurringSummary(store.deals, thisMonth);
-    const openRecurring = pipelineMRR(store.deals);
+    const recurring = recurringSummary(teamStore.deals, thisMonth);
+    const openRecurring = pipelineMRR(teamStore.deals);
     const showRecurring = recurring.count > 0 || openRecurring.count > 0;
     /* Touches this week against the weekly target - the number a founder
        can still do something about today. Only with a target set: without
        one the count is a fact, not progress. */
-    const touches = touchProgress(store.activities, store.settings.touchTargets, today);
+    const touches = touchProgress(teamStore.activities, teamStore.settings.touchTargets, today);
 
-    const openTasks = store.openTasks();
+    const openTasks = teamStore.openTasks();
     const needsAttention = openTasks.filter((t) => t.due <= today);
     const upcoming = openTasks.filter((t) => t.due > today).slice(0, 3);
-    const stalled = stalledDeals(store.deals, store.settings.staleDays).slice(0, 3);
-    const coldDays = store.settings.coldDays;
-    const cold = goingCold(store.contacts, (id) => store.lastContactedAt(id), { coldDays }).slice(0, 4);
-    const nextless = noNextStep(store.deals, {
-      lastTouchOf: (d) => store.lastTouchedDeal(d),
-      hasOpenTask: (id) => store.hasOpenTask(id),
+    const stalled = stalledDeals(teamStore.deals, teamStore.settings.staleDays).slice(0, 3);
+    const coldDays = teamStore.settings.coldDays;
+    const cold = goingCold(teamStore.contacts, (id) => teamStore.lastContactedAt(id), { coldDays }).slice(0, 4);
+    const nextless = noNextStep(teamStore.deals, {
+      lastTouchOf: (d) => teamStore.lastTouchedDeal(d),
+      hasOpenTask: (id) => teamStore.hasOpenTask(id),
       coldDays,
     }).slice(0, 3);
     /* Deals with nobody named as the person who signs. Only worth raising
        once the book has people on its deals at all - on a fresh account
        every deal would qualify, which is noise, not attention. */
-    const anyRole = store.deals.some((d) => (d.contacts || []).some((e) => e.role));
-    const undecided = anyRole ? noDecisionMaker(store.deals).slice(0, 3) : [];
+    const anyRole = teamStore.deals.some((d) => (d.contacts || []).some((e) => e.role));
+    const undecided = anyRole ? noDecisionMaker(teamStore.deals).slice(0, 3) : [];
 
     /* Won delta vs last month - only when last month had something to compare
        to. The month is named the way the tile's own label names this one:
@@ -133,7 +133,7 @@ export function dashboardView() {
       },
         statTile({
           label: 'Open pipeline',
-          value: compactMoney(pipelineValue(store.deals), currency),
+          value: compactMoney(pipelineValue(teamStore.deals), currency),
           sub: `${open.length} deal${open.length === 1 ? '' : 's'} in play`,
         }),
         // The unit lives in the label, not the value: a "/mo" suffix on the
@@ -148,7 +148,7 @@ export function dashboardView() {
         }),
         statTile({
           label: 'Weighted forecast',
-          value: compactMoney(weightedPipeline(store.deals, overrides, stageList), currency),
+          value: compactMoney(weightedPipeline(teamStore.deals, overrides, stageList), currency),
           sub: 'probability-adjusted',
         }),
         goal.pace
@@ -229,8 +229,8 @@ export function dashboardView() {
               el('a.grow.min0', { href: `#/pipeline?id=${deal.id}` },
                 el('div.deal-row-name', {}, deal.name),
                 el('div.person-sub', {},
-                  store.companyById(deal.companyId)?.name
-                  || store.contactById(deal.contactId)?.name || 'No linked record')
+                  teamStore.companyById(deal.companyId)?.name
+                  || teamStore.contactById(deal.contactId)?.name || 'No linked record')
               ),
               el('button.btn.btn-ghost.btn-sm', {
                 html: icon('userPlus', 14, 2),
@@ -245,8 +245,8 @@ export function dashboardView() {
               el('div.grow.min0', {},
                 el('div.deal-row-name', {}, d.name),
                 el('div.person-sub', {},
-                  store.companyById(d.companyId)?.name
-                  || store.contactById(d.contactId)?.name || 'No linked record')
+                  teamStore.companyById(d.companyId)?.name
+                  || teamStore.contactById(d.contactId)?.name || 'No linked record')
               ),
               el('span.age-pill', { dataset: { tone: 'stalled' } },
                 el('span', { html: icon('clock', 12, 2.2), 'aria-hidden': 'true' }),
@@ -302,8 +302,8 @@ export function dashboardView() {
             html: icon('plus', 14, 2.2),
             onclick: () => openActivityForm(),
           }, ' Log'),
-          store.activities.length
-            ? el('div.activity-list', {}, store.recentActivities(5).map((a) =>
+          teamStore.activities.length
+            ? el('div.activity-list', {}, teamStore.recentActivities(5).map((a) =>
                 activityRow(a, { onEdit: (act) => openActivityForm(act) })))
             : el('p.card-empty', {}, 'Meetings, calls, and notes you log show up here.')
         )
@@ -312,14 +312,14 @@ export function dashboardView() {
   }
 
   const renderOnChange = keepingFocus(render);
-  store.addEventListener('change', renderOnChange);
+  teamStore.addEventListener('change', renderOnChange);
   render();
 
-  const username = store.user?.username;
+  const username = teamStore.user?.username;
   root.append(
     pageHead(username ? `${greeting()}, ${username}` : greeting()),
     body
   );
-  root.destroy = () => store.removeEventListener('change', renderOnChange);
+  root.destroy = () => teamStore.removeEventListener('change', renderOnChange);
   return root;
 }

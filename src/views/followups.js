@@ -1,6 +1,6 @@
 import { el, clear, append, keepingFocus } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { store } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
 import { todayISO, formatDate, formatMonth, formatClock } from '../lib/util.js';
 import { isOpen } from '../lib/forecast.js';
 import {
@@ -30,11 +30,11 @@ export function followupsView({ params } = {}) {
   // Deep link from a reminder notification: open that follow-up directly.
   const focusId = params?.get('task');
   if (focusId) {
-    const task = store.tasks.find((t) => t.id === focusId);
+    const task = teamStore.tasks.find((t) => t.id === focusId);
     if (task) setTimeout(() => openTaskForm(task), 60);
   }
 
-  const stored = store.settings.followupView;
+  const stored = teamStore.settings.followupView;
   let mode = stored === 'month' || stored === 'week' ? stored : 'list';
 
   /* A month grid at 390px is a week strip, not a shrunk month - so a narrow
@@ -61,7 +61,7 @@ export function followupsView({ params } = {}) {
     if (effectiveMode() === next) return;
     mode = next;
     anchor = periodAnchor(effectiveMode() === 'month' ? 'month' : 'week');
-    store.updateSettings({ followupView: next }).catch(() => {});
+    teamStore.updateSettings({ followupView: next }).catch(() => {});
     renderControls();
     render();
   }
@@ -71,10 +71,10 @@ export function followupsView({ params } = {}) {
      pairing the .ics export makes. ----- */
 
   function entries() {
-    const rows = store.openTasks().map((task) => ({
+    const rows = teamStore.openTasks().map((task) => ({
       kind: 'task', date: task.due, id: task.id, task,
     }));
-    for (const deal of store.deals) {
+    for (const deal of teamStore.deals) {
       if (!isOpen(deal) || !deal.expectedClose) continue;
       rows.push({ kind: 'deal', date: deal.expectedClose, id: deal.id, deal });
     }
@@ -86,7 +86,7 @@ export function followupsView({ params } = {}) {
     if (!task || task.due === iso) return;
     const prev = { due: task.due, dueTime: task.dueTime };
     try {
-      await store.updateTask(task.id, { due: iso });
+      await teamStore.updateTask(task.id, { due: iso });
     } catch {
       toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
       return;
@@ -95,7 +95,7 @@ export function followupsView({ params } = {}) {
       icon: 'calendar',
       action: {
         label: 'Undo',
-        onClick: () => store.updateTask(task.id, prev)
+        onClick: () => teamStore.updateTask(task.id, prev)
           .catch(() => toast('Couldn’t undo. Check your connection', { icon: 'wifiOff' })),
       },
     });
@@ -120,7 +120,7 @@ export function followupsView({ params } = {}) {
     const modal = openModal({
       title: formatDate(iso, { year: 'always' }),
       content: body,
-      onClose: () => store.removeEventListener('change', render),
+      onClose: () => teamStore.removeEventListener('change', render),
     });
 
     function render() {
@@ -130,10 +130,10 @@ export function followupsView({ params } = {}) {
       const focusKey = body.contains(document.activeElement)
         ? document.activeElement.dataset?.focusKey : null;
       clear(body);
-      const tasks = store.tasks
+      const tasks = teamStore.tasks
         .filter((t) => t.due === iso && (!t.done || opened.has(t.id)))
         .sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99'));
-      const deals = store.deals.filter((d) => isOpen(d) && d.expectedClose === iso);
+      const deals = teamStore.deals.filter((d) => isOpen(d) && d.expectedClose === iso);
       // Moved, deleted, or closed away: a sheet about a day with nothing
       // left on it has nothing left to say.
       if (!tasks.length && !deals.length) { modal.close(); return; }
@@ -160,7 +160,7 @@ export function followupsView({ params } = {}) {
     }
 
     render();
-    store.addEventListener('change', render);
+    teamStore.addEventListener('change', render);
     return modal;
   }
 
@@ -303,7 +303,7 @@ export function followupsView({ params } = {}) {
       node.addEventListener('drop', async (e) => {
         e.preventDefault();
         node.classList.remove('drop-target');
-        const task = store.tasks.find((t) => t.id === e.dataTransfer.getData('text/task-id'));
+        const task = teamStore.tasks.find((t) => t.id === e.dataTransfer.getData('text/task-id'));
         await moveTask(task, cell.iso);
       });
 
@@ -350,11 +350,11 @@ export function followupsView({ params } = {}) {
 
   function list() {
     const today = todayISO();
-    const open = store.openTasks();
+    const open = teamStore.openTasks();
     const overdue = open.filter((t) => t.due < today);
     const dueToday = open.filter((t) => t.due === today);
     const upcoming = open.filter((t) => t.due > today);
-    const doneAll = store.tasks.filter((t) => t.done);
+    const doneAll = teamStore.tasks.filter((t) => t.done);
     const done = [...doneAll]
       .sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
       .slice(0, 10);
@@ -393,7 +393,7 @@ export function followupsView({ params } = {}) {
 
   function renderControls() {
     clear(controls);
-    if (!store.tasks.length) return;
+    if (!teamStore.tasks.length) return;
     const options = [
       ['list', 'List', 'listChecks'],
       ['week', 'Week', 'calendar'],
@@ -417,7 +417,7 @@ export function followupsView({ params } = {}) {
   function render() {
     shownMode = effectiveMode();
     clear(body);
-    if (!store.tasks.length) {
+    if (!teamStore.tasks.length) {
       body.append(emptyState({
         icon: 'followups',
         title: 'Nothing to chase yet',
@@ -434,7 +434,7 @@ export function followupsView({ params } = {}) {
     renderControls();
     render();
   });
-  store.addEventListener('change', renderOnChange);
+  teamStore.addEventListener('change', renderOnChange);
 
   /* A window crossing the month-grid breakpoint changes what this page can
      offer, so the toggle always rebuilds rather than be left offering
@@ -465,7 +465,7 @@ export function followupsView({ params } = {}) {
     body
   );
   root.destroy = () => {
-    store.removeEventListener('change', renderOnChange);
+    teamStore.removeEventListener('change', renderOnChange);
     media.removeEventListener('change', onResize);
   };
   return root;

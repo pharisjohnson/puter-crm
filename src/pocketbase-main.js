@@ -2,7 +2,7 @@ import './styles/index.css';
 import { el } from './ui/dom.js';
 import { icon } from './ui/icons.js';
 import { store } from './lib/store.js';
-import { teamProvider, wrapStore } from './lib/team.js';
+import { initTeamContext, getTeamStore, getTeamProvider } from './lib/team-context.js';
 import { shouldOnboard, openOnboarding } from './ui/onboarding.js';
 import { applyTheme } from './ui/theme.js';
 import { mountShell } from './ui/shell.js';
@@ -64,17 +64,17 @@ function registerWorker() {
 
 async function boot() {
   try {
-    // Initialize team context before store.init()
-    await teamProvider.init();
-    await store.init();
+    // Initialize team context (includes store.init())
+    const teamStore = await initTeamContext();
+    const teamProvider = getTeamProvider();
   } catch (err) {
     console.error(err);
     showError('Couldn\'t load your data', 'Something went wrong talking to PocketBase.', () => location.reload());
     return;
   }
 
-  // Wrap store with team-aware proxy
-  const teamStore = wrapStore(store);
+  const teamStore = getTeamStore();
+  const teamProvider = getTeamProvider();
 
   applyTheme(store.settings.theme || 'system');
   mountShell(appRoot);

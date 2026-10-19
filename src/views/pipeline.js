@@ -1,6 +1,6 @@
 import { el, clear, append, keepingFocus } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { store } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
 import {
   isOpen, probabilityOf, daysInStage, isStalled, stageEnteredAt,
   isTerminalStage, matchesCloseWindow, CLOSE_WINDOWS, confidenceLabel,
@@ -51,12 +51,12 @@ async function moveDealTo(deal, stage) {
   if (deal.stage === stage) return;
   const from = deal.stage;
   try {
-    await store.moveDeal(deal.id, stage);
+    await teamStore.moveDeal(deal.id, stage);
   } catch {
     toast('Couldn’t save the move. Check your connection', { icon: 'wifiOff' });
     return;
   }
-  const undo = () => store.moveDeal(deal.id, from)
+  const undo = () => teamStore.moveDeal(deal.id, from)
     .catch(() => toast('Couldn’t undo. Check your connection', { icon: 'wifiOff' }));
   if (stage !== 'won' && stage !== 'lost') {
     // A stage change is a promise of momentum; if nothing is booked to
@@ -64,8 +64,8 @@ async function moveDealTo(deal, stage) {
     // playbook waiting on this stage is the better offer where there is
     // one - it books the whole cadence instead of one step - so the nudge
     // stands down for it rather than stacking a second dialog.
-    const label = stageLabelOf(stage, store.stages());
-    const moved = store.dealById(deal.id) || deal;
+    const label = stageLabelOf(stage, teamStore.stages());
+    const moved = teamStore.dealById(deal.id) || deal;
     if (maybeOfferPlaybook(moved, stage)) return;
     if (maybeNudgeNextStep({
       dealId: moved.id, contactId: moved.contactId,
@@ -88,7 +88,7 @@ async function moveDealTo(deal, stage) {
   // Ask why while it is still fresh; the Undo toast waits its turn so the
   // two never fight over the bottom of the screen - and it is the
   // confirmation for this whole move, so the sheet doesn't raise its own.
-  openCloseReasonForm(store.dealById(deal.id) || deal, { onClose: done, confirm: false });
+  openCloseReasonForm(teamStore.dealById(deal.id) || deal, { onClose: done, confirm: false });
 }
 
 /** Keyboard/touch alternative to drag & drop: pick the stage from a sheet. */
@@ -96,7 +96,7 @@ function openMoveSheet(deal) {
   const modal = openModal({
     title: 'Move deal',
     content: el('div.settings-list', {},
-      store.stages().map((s) => el('button.settings-row', {
+      teamStore.stages().map((s) => el('button.settings-row', {
         type: 'button',
         'aria-current': deal.stage === s.id ? 'true' : null,
         onclick: async () => { modal.close(); await moveDealTo(deal, s.id); },
@@ -112,8 +112,8 @@ function openMoveSheet(deal) {
 /* ---------- deals: board and list over one set of filters ---------- */
 
 /** The name shown in the Company / contact column, or '' for the dash. */
-const linkNameOf = (d) => store.companyById(d.companyId)?.name
-  || store.contactById(d.contactId)?.name || '';
+const linkNameOf = (d) => teamStore.companyById(d.companyId)?.name
+  || teamStore.contactById(d.contactId)?.name || '';
 
 /* Sortable list columns. `get` feeds the comparator; `num`/`hide` shape the
    table so a phone shows the four columns that matter and a desktop all
@@ -128,7 +128,7 @@ const COLUMNS = [
   { key: 'link', cls: 'col-link', text: true,
     get: (d) => linkNameOf(d).toLowerCase(), empty: (d) => !linkNameOf(d) },
   { key: 'stage', cls: 'col-stage',
-    get: (d) => store.stages().findIndex((s) => s.id === d.stage) },
+    get: (d) => teamStore.stages().findIndex((s) => s.id === d.stage) },
   // Contract value, so a $2k/mo subscription and a $10k one-off sort
   // against each other by what they are actually worth.
   { key: 'value', num: true, get: (d) => contractValue(d) },
@@ -151,7 +151,7 @@ function dealsView(params) {
   /* Choice and yes/no custom fields, ANDed with the rest: { [fieldId]: value }. */
   let fieldFilters = {};
   let sort = { ...DEFAULT_DEAL_SORT };
-  let mode = store.settings.dealView === 'list' ? 'list' : 'board';
+  let mode = teamStore.settings.dealView === 'list' ? 'list' : 'board';
   // Closed columns stay collapsed while the board is focused on open work,
   // until the user asks to see one.
   const expanded = new Set();
@@ -160,20 +160,20 @@ function dealsView(params) {
      which columns the board shows, so it is kept separate. */
   const matchesSearch = (d) => matchesCloseWindow(d, closeWindow)
     && tagsFilter.every((t) => hasTag(d.tags, t))
-    && matchesCustomFilters(d, store.customFields('deals'), fieldFilters)
+    && matchesCustomFilters(d, teamStore.customFields('deals'), fieldFilters)
     && (!query
       || fuzzyIncludes(d.name, query)
-      || fuzzyIncludes(store.companyById(d.companyId)?.name, query)
+      || fuzzyIncludes(teamStore.companyById(d.companyId)?.name, query)
       // Any of the deal's people, not only the one who leads it: looking
       // for "the Priya deal" has to find it whoever is primary.
-      || dealContactIds(d).some((id) => fuzzyIncludes(store.contactById(id)?.name, query))
+      || dealContactIds(d).some((id) => fuzzyIncludes(teamStore.contactById(id)?.name, query))
       || fuzzyIncludes(d.notes, query));
 
   const matchesStage = (d) => stageFilter === 'all'
     || (stageFilter === 'open' ? isOpen(d) : d.stage === stageFilter);
 
-  const filtered = () => store.deals.filter((d) => matchesStage(d) && matchesSearch(d));
-  const activeFields = () => activeFieldFilters(store.customFields('deals'), fieldFilters);
+  const filtered = () => teamStore.deals.filter((d) => matchesStage(d) && matchesSearch(d));
+  const activeFields = () => activeFieldFilters(teamStore.customFields('deals'), fieldFilters);
   const filtersActive = () => query !== '' || closeWindow !== 'any' || stageFilter !== 'open'
     || tagsFilter.length > 0 || activeFields().length > 0;
 
@@ -225,10 +225,10 @@ function dealsView(params) {
       {
         icon: 'pipeline', label: 'Stage',
         onClick: () => pickSheet('Move to stage',
-          store.stages().map((s) => ({ value: s.id, node: stageBadge(s.id) })),
+          teamStore.stages().map((s) => ({ value: s.id, node: stageBadge(s.id) })),
           async (v) => {
             try {
-              const n = await store.bulkMoveDeals(ids(), v);
+              const n = await teamStore.bulkMoveDeals(ids(), v);
               selection.clear();
               bulkToast(n, 'Stage set', 'pipeline');
             } catch { fail(); }
@@ -238,7 +238,7 @@ function dealsView(params) {
         icon: 'tag', label: 'Tag',
         onClick: () => openBulkTagSheet(async (tag) => {
           try {
-            const n = await store.bulkTag('deals', ids(), tag);
+            const n = await teamStore.bulkTag('deals', ids(), tag);
             selection.clear();
             bulkToast(n, `Tagged “${tag}”`, 'tag');
           } catch { fail(); }
@@ -247,7 +247,7 @@ function dealsView(params) {
       {
         icon: 'fileDown', label: 'Export',
         onClick: () => {
-          const records = store.deals.filter((d) => selection.has(d.id));
+          const records = teamStore.deals.filter((d) => selection.has(d.id));
           downloadFile(`crm-deals-selection-${todayISO()}.csv`,
             `﻿${exportRecords('deals', records, exportContext())}`, 'text/csv');
           toast(`${records.length} deal${records.length === 1 ? '' : 's'} exported`, { icon: 'fileDown' });
@@ -258,7 +258,7 @@ function dealsView(params) {
         onClick: async () => {
           if (!await confirmBulkDelete(selection.size, selection.size === 1 ? 'deal' : 'deals')) return;
           try {
-            const entries = await store.bulkDelete('deals', ids());
+            const entries = await teamStore.bulkDelete('deals', ids());
             selection.clear();
             toast(`${entries.length} deal${entries.length === 1 ? '' : 's'} deleted`, { icon: 'trash' });
           } catch { fail(); }
@@ -283,7 +283,7 @@ function dealsView(params) {
 
   function renderControls() {
     clear(controls);
-    const stages = store.stages();
+    const stages = teamStore.stages();
     const chips = [
       { value: 'open', label: 'Open' },
       { value: 'all', label: 'All' },
@@ -326,8 +326,8 @@ function dealsView(params) {
   /* ----- board ----- */
 
   function boardEl() {
-    const stages = store.stages();
-    const rows = store.deals.filter(matchesSearch);
+    const stages = teamStore.stages();
+    const rows = teamStore.deals.filter(matchesSearch);
     const shown = stageFilter === 'all' || stageFilter === 'open'
       ? stages
       : stages.filter((s) => s.id === stageFilter);
@@ -345,7 +345,7 @@ function dealsView(params) {
         .filter((d) => d.stage === s.id)
         .sort((a, b) => b.updatedAt - a.updatedAt);
       const total = deals.reduce((sum, d) => sum + contractValue(d), 0);
-      const money = compactMoney(total, store.settings.currency);
+      const money = compactMoney(total, teamStore.settings.currency);
 
       const col = el('section.board-col', {
         role: 'listitem',
@@ -414,7 +414,7 @@ function dealsView(params) {
       col.addEventListener('drop', async (e) => {
         e.preventDefault();
         col.classList.remove('drop-target');
-        const deal = store.dealById(e.dataTransfer.getData('text/deal-id'));
+        const deal = teamStore.dealById(e.dataTransfer.getData('text/deal-id'));
         if (deal) await moveDealTo(deal, s.id);
       });
 
@@ -424,10 +424,10 @@ function dealsView(params) {
   }
 
   function dealCard(d) {
-    const company = store.companyById(d.companyId);
-    const contact = store.contactById(d.contactId);
+    const company = teamStore.companyById(d.companyId);
+    const contact = teamStore.contactById(d.contactId);
     const due = d.expectedClose && isOpen(d) ? dueLabel(d.expectedClose) : null;
-    const stalled = isStalled(d, store.settings.staleDays);
+    const stalled = isStalled(d, teamStore.settings.staleDays);
     const confidence = isOpen(d) ? confidenceLabel(d.confidence) : null;
 
     const card = el('article.deal-card', { draggable: 'true' },
@@ -436,9 +436,9 @@ function dealsView(params) {
         // A recurring deal leads with its rate and says what the contract
         // comes to - "$2,000/mo · $24K total" - because either number
         // alone is a different deal.
-        el('div.deal-card-value', {}, rateText(d, store.settings.currency),
+        el('div.deal-card-value', {}, rateText(d, teamStore.settings.currency),
           isRecurring(d) && el('span.deal-card-term', {},
-            ` · ${compactMoney(contractValue(d), store.settings.currency)} total`)),
+            ` · ${compactMoney(contractValue(d), teamStore.settings.currency)} total`)),
         (company || contact) && el('div.deal-card-sub', {}, company?.name || contact?.name),
         el('div.deal-card-pills', {},
           due && el('span.due-pill', { dataset: { status: due.status === 'overdue' ? 'overdue' : 'later' } },
@@ -482,7 +482,7 @@ function dealsView(params) {
   /* ----- list ----- */
 
   function listEl() {
-    const stages = store.stages();
+    const stages = teamStore.stages();
     const col = COLUMNS.find((c) => c.key === sort.key) || COLUMNS[0];
     const dir = sort.dir === 'asc' ? 1 : -1;
     const rows = filtered().sort((a, b) => {
@@ -582,7 +582,7 @@ function dealsView(params) {
   }
 
   function dealRow(d, stages, order) {
-    const link = store.companyById(d.companyId) || store.contactById(d.contactId);
+    const link = teamStore.companyById(d.companyId) || teamStore.contactById(d.contactId);
     const href = `#/pipeline?id=${d.id}`;
     const due = d.expectedClose && isOpen(d) ? dueLabel(d.expectedClose) : null;
 
@@ -590,14 +590,14 @@ function dealsView(params) {
       el('td.col-select', {}, selectBox(selection, d.id, order, d.name)),
       el('th', { scope: 'row' },
         el('a.deal-tr-name', { href }, d.name),
-        isStalled(d, store.settings.staleDays) && el('span.age-pill', { dataset: { tone: 'stalled' } },
+        isStalled(d, teamStore.settings.staleDays) && el('span.age-pill', { dataset: { tone: 'stalled' } },
           `${daysInStage(d)}d in stage`)
       ),
       el('td.col-link', {}, link?.name || '–'),
       el('td.col-stage', {}, stageBadge(d.stage, stages)),
       el('td.num', {},
         moneyText(contractValue(d)),
-        isRecurring(d) && el('span.cell-sub', {}, rateText(d, store.settings.currency))),
+        isRecurring(d) && el('span.cell-sub', {}, rateText(d, teamStore.settings.currency))),
       el('td.col-close', {},
         d.expectedClose
           ? el('span', { className: due?.status === 'overdue' ? 'text-critical' : '' },
@@ -628,9 +628,9 @@ function dealsView(params) {
     clear(body);
     clear(bulkWrap);
     renderViews();
-    selection.prune(store.deals.map((d) => d.id));
+    selection.prune(teamStore.deals.map((d) => d.id));
 
-    if (!store.deals.length) {
+    if (!teamStore.deals.length) {
       controls.hidden = true;
       viewRow.hidden = true;
       body.append(emptyState({
@@ -671,7 +671,7 @@ function dealsView(params) {
             b.classList.toggle('active', on);
             b.setAttribute('aria-pressed', String(on));
           }
-          store.updateSettings({ dealView: value }).catch(() => {});
+          teamStore.updateSettings({ dealView: value }).catch(() => {});
           render();
         },
       }, ` ${label}`)));
@@ -688,13 +688,13 @@ function dealsView(params) {
   }
   render();
   let vocabulary = tagVocabulary('deals');
-  let fieldsSig = fieldSignature(store.customFields('deals'));
+  let fieldsSig = fieldSignature(teamStore.customFields('deals'));
   const renderOnChange = keepingFocus(() => {
     // A tag or a custom field added while this board is open belongs in its
     // filter row. Only a real change rebuilds the controls, so the search
     // box isn't replaced under the caret on every unrelated save.
     const next = tagVocabulary('deals');
-    const nextFields = fieldSignature(store.customFields('deals'));
+    const nextFields = fieldSignature(teamStore.customFields('deals'));
     if (next !== vocabulary || nextFields !== fieldsSig) {
       vocabulary = next;
       fieldsSig = nextFields;
@@ -702,7 +702,7 @@ function dealsView(params) {
     }
     render();
   });
-  store.addEventListener('change', renderOnChange);
+  teamStore.addEventListener('change', renderOnChange);
 
   root.append(
     pageHead('Pipeline',
@@ -718,7 +718,7 @@ function dealsView(params) {
     body,
     bulkWrap
   );
-  root.destroy = () => store.removeEventListener('change', renderOnChange);
+  root.destroy = () => teamStore.removeEventListener('change', renderOnChange);
   return root;
 }
 
@@ -743,10 +743,10 @@ function timeInStageText(deal, stages) {
  * were last spoken to - the three things that decide who to call next.
  */
 function personRow(deal, contactId) {
-  const contact = store.contactById(contactId);
+  const contact = teamStore.contactById(contactId);
   if (!contact) return null;
   const role = roleOf(deal, contactId);
-  const lastAt = store.lastContactedAt(contactId);
+  const lastAt = teamStore.lastContactedAt(contactId);
   const primary = deal.contactId === contactId;
   return el('a.person-row.deal-person-row', { href: `#/leads?id=${contact.id}` },
     avatar(contact.name),
@@ -767,8 +767,8 @@ function personRow(deal, contactId) {
 
 /** Last conversation touching this deal - its own history or its contact's. */
 function dealTouchChip(deal) {
-  const lastAt = store.lastTouchedDeal(deal);
-  const coldDays = store.settings.coldDays;
+  const lastAt = teamStore.lastTouchedDeal(deal);
+  const coldDays = teamStore.settings.coldDays;
   const since = lastAt || todayISO(new Date(deal.createdAt));
   const { text, days } = sinceLabel(since);
   const cold = coldDays > 0 && days >= coldDays;
@@ -801,7 +801,7 @@ function dealDetail(id) {
 
   function render() {
     clear(body);
-    const deal = store.dealById(id);
+    const deal = teamStore.dealById(id);
     if (!deal) {
       body.append(emptyState({
         icon: 'deal', title: 'Deal not found',
@@ -811,12 +811,12 @@ function dealDetail(id) {
       return;
     }
 
-    const stages = store.stages();
+    const stages = teamStore.stages();
     const probability = Math.round(
-      probabilityOf(deal, store.settings.stageProbabilities, stages) * 100);
-    const tasks = store.tasksFor({ dealId: id });
+      probabilityOf(deal, teamStore.settings.stageProbabilities, stages) * 100);
+    const tasks = teamStore.tasksFor({ dealId: id });
     // Everyone's conversations, not just the ones filed against the deal.
-    const history = store.dealActivities(deal);
+    const history = teamStore.dealActivities(deal);
     const people = dealContactIds(deal);
     const due = deal.expectedClose && isOpen(deal) ? dueLabel(deal.expectedClose) : null;
 
@@ -839,9 +839,9 @@ function dealDetail(id) {
             stageBadge(deal.stage)
           ),
           el('div.deal-figures', {},
-            el('span.deal-detail-value', {}, rateText(deal, store.settings.currency)),
+            el('span.deal-detail-value', {}, rateText(deal, teamStore.settings.currency)),
             isRecurring(deal) && el('span.deal-detail-contract', {},
-              contractText(deal, store.settings.currency)),
+              contractText(deal, teamStore.settings.currency)),
             isOpen(deal) && el('span.deal-detail-prob', {},
               `${probability}% likely · ${moneyText(contractValue(deal) * probability / 100)} weighted`),
             isOpen(deal) && confidenceLabel(deal.confidence) && el('span.age-pill.conf-pill', {
@@ -865,7 +865,7 @@ function dealDetail(id) {
               el('span', { html: icon(deal.stage === 'won' ? 'trophy' : 'circleX', 13, 2) }),
               `Closed ${timeAgo(deal.closedAt)}`),
             isOpen(deal) && el('span.chip.static', {
-              dataset: isStalled(deal, store.settings.staleDays) ? { tone: 'stalled' } : {},
+              dataset: isStalled(deal, teamStore.settings.staleDays) ? { tone: 'stalled' } : {},
             },
               el('span', { html: icon('clock', 13, 2) }),
               timeInStageText(deal, stages)),
@@ -875,9 +875,9 @@ function dealDetail(id) {
           )
         ),
         el('div.detail-actions', {},
-          store.contactById(deal.contactId)?.email && el('button.btn.btn-ghost.btn-sm', {
+          teamStore.contactById(deal.contactId)?.email && el('button.btn.btn-ghost.btn-sm', {
             html: icon('mail', 15, 2),
-            onclick: () => openEmailFlow({ contact: store.contactById(deal.contactId), deal }),
+            onclick: () => openEmailFlow({ contact: teamStore.contactById(deal.contactId), deal }),
           }, ' Email…'),
           el('button.btn.btn-ghost.btn-sm', {
             html: icon('pencil', 15, 2),
@@ -896,7 +896,7 @@ function dealDetail(id) {
               // "Deal not found" for the whole round trip.
               location.hash = '#/pipeline';
               try {
-                const entry = await store.deleteDeal(id);
+                const entry = await teamStore.deleteDeal(id);
                 deletedToast('Deal deleted', entry);
               } catch {
                 toast('Couldn’t delete. Check your connection', { icon: 'wifiOff' });
@@ -987,13 +987,13 @@ function dealDetail(id) {
   }
 
   const renderOnChange = keepingFocus(render);
-  store.addEventListener('change', renderOnChange);
+  teamStore.addEventListener('change', renderOnChange);
   render();
 
   root.append(
     el('a.back-link', { href: '#/pipeline', html: icon('chevL', 16, 2.2) }, 'Pipeline'),
     body
   );
-  root.destroy = () => store.removeEventListener('change', renderOnChange);
+  root.destroy = () => teamStore.removeEventListener('change', renderOnChange);
   return root;
 }

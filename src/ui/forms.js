@@ -15,7 +15,7 @@ import { pasteToFillButton, fillSummary } from './ai.js';
 import { downloadTaskICS } from './calendar.js';
 import { openModal, confirmDialog } from './modal.js';
 import { toast } from './toast.js';
-import { store, CONTACT_STATUSES, LEAD_SOURCES, ACTIVITY_TYPES, repeatLabel } from '../lib/store.js';
+import { teamStore, CONTACT_STATUSES, LEAD_SOURCES, ACTIVITY_TYPES, repeatLabel } from '../lib/team-context.js';
 import { isOpen, CONFIDENCE_LEVELS } from '../lib/forecast.js';
 import {
   BILLING_MODES, DEFAULT_TERM, MAX_TERM, normalizeBilling, rateText, contractText,
@@ -240,7 +240,7 @@ export function openCompanyForm(company = null, { onSaved = null } = {}) {
       ...(custom ? { custom: custom.get() } : {}),
     };
     const saved = company
-      ? await store.updateCompany(company.id, data)
+      ? await teamStore.updateCompany(company.id, data)
       : await store.addCompany(data);
     modal.close();
     toast(company ? 'Company updated' : 'Company added');
@@ -344,7 +344,7 @@ export function openContactForm(contact = null, { presets = {}, onSaved = null }
       ...(custom ? { custom: custom.get() } : {}),
     };
     const saved = contact
-      ? await store.updateContact(contact.id, data)
+      ? await teamStore.updateContact(contact.id, data)
       : await store.addContact(data);
     modal.close();
     toast(contact ? 'Lead updated' : 'Lead added');
@@ -599,7 +599,7 @@ export function openDealForm(deal = null, { presets = {}, onSaved = null } = {})
     // shouldn't be interrogated.
     const closing = deal && isOpen(deal) && !isOpen(data);
     const saved = deal
-      ? await store.updateDeal(deal.id, data)
+      ? await teamStore.updateDeal(deal.id, data)
       : await store.addDeal(data);
     modal.close();
     toast(deal ? 'Deal updated' : 'Deal added');
@@ -641,7 +641,7 @@ export function openActivityForm(activity = null, { presets = {}, onSaved = null
       onDelete: activity && deleteAction({
         title: 'Delete this activity?',
         message: 'It is removed from every lead, company, and deal history, and goes to Recently deleted for 30 days.',
-        run: () => store.deleteActivity(activity.id),
+        run: () => teamStore.deleteActivity(activity.id),
         done: 'Activity deleted',
         closeModal: () => modal.close(),
       }),
@@ -665,7 +665,7 @@ export function openActivityForm(activity = null, { presets = {}, onSaved = null
         || presets.companyId || activity?.companyId || null,
     };
     const saved = activity
-      ? await store.updateActivity(activity.id, data)
+      ? await teamStore.updateActivity(activity.id, data)
       : await store.addActivity(data);
     modal.close();
     // Logging a touch on a record with nothing else booked is the moment
@@ -751,7 +751,7 @@ export function openTaskForm(task = null, { presets = {}, onSaved = null } = {})
       onDelete: task && deleteAction({
         title: 'Delete this follow-up?',
         message: 'The reminder goes to Recently deleted for 30 days. Done follow-ups can simply stay checked off instead.',
-        run: () => store.deleteTask(task.id),
+        run: () => teamStore.deleteTask(task.id),
         done: 'Follow-up deleted',
         closeModal: () => modal.close(),
       }),
@@ -768,7 +768,7 @@ export function openTaskForm(task = null, { presets = {}, onSaved = null } = {})
       repeat: repeat.select.value ? { every: Number(every), unit } : null,
     };
     const saved = task
-      ? await store.updateTask(task.id, data)
+      ? await teamStore.updateTask(task.id, data)
       : await store.addTask(data);
     modal.close();
     toast(task ? 'Follow-up updated' : 'Follow-up added');

@@ -1,5 +1,5 @@
 import { el, clear, append, keepingFocus } from '../ui/dom.js';
-import { store } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
 import {
   forecastByMonth, weightedPipeline, pipelineValue, stageSummary,
   winRate, avgSalesCycle, isTerminalStage, stageVelocity, isOpen,
@@ -77,11 +77,11 @@ export function forecastView() {
 
   function render() {
     clear(body);
-    const { currency, stageProbabilities: overrides } = store.settings;
-    const stageList = store.stages();
-    const open = store.deals.filter((d) => !isTerminalStage(d.stage));
+    const { currency, stageProbabilities: overrides } = teamStore.settings;
+    const stageList = teamStore.stages();
+    const open = teamStore.deals.filter((d) => !isTerminalStage(d.stage));
 
-    if (!store.deals.length) {
+    if (!teamStore.deals.length) {
       body.append(emptyState({
         icon: 'chart',
         title: 'Nothing to forecast yet',
@@ -91,37 +91,37 @@ export function forecastView() {
       return;
     }
 
-    const rows = forecastByMonth(store.deals, { months: HORIZON, overrides, stages: stageList });
-    const weighted = weightedPipeline(store.deals, overrides, stageList);
-    const goal = goalProgress(store.deals, store.settings.revenueGoal);
+    const rows = forecastByMonth(teamStore.deals, { months: HORIZON, overrides, stages: stageList });
+    const weighted = weightedPipeline(teamStore.deals, overrides, stageList);
+    const goal = goalProgress(teamStore.deals, teamStore.settings.revenueGoal);
     const coverage = pipelineCoverage(weighted, goal.remaining);
-    const rate = winRate(store.deals);
-    const cycle = avgSalesCycle(store.deals);
+    const rate = winRate(teamStore.deals);
+    const cycle = avgSalesCycle(teamStore.deals);
 
     /* Per-stage contribution: how the weighted number is built. */
     const stages = stageSummary(open, overrides, stageList).filter((s) =>
       !isTerminalStage(s.stage) && s.count > 0);
     const maxStage = Math.max(...stages.map((s) => s.weighted), 1);
 
-    const velocity = stageVelocity(store.deals, stageList);
+    const velocity = stageVelocity(teamStore.deals, stageList);
     const maxVelocity = Math.max(...velocity.map((v) => v.days || 0), 1);
 
     /* Trajectory: everything derived at render time from createdAt,
        closedAt, and values - no snapshots, no new stored data. */
-    const flows = monthlyFlows(store.deals);
+    const flows = monthlyFlows(teamStore.deals);
     const anyFlow = flows.some((r) => r.added.count || r.won.count || r.lost.count);
     const rateTrend = winRateTrend(flows);
-    const cycleTrend = salesCycleTrend(store.deals);
+    const cycleTrend = salesCycleTrend(teamStore.deals);
 
     /* Win/loss analysis over everything that has closed. */
-    const closed = store.deals.filter((d) => !isOpen(d));
+    const closed = teamStore.deals.filter((d) => !isOpen(d));
     const wonReasons = closeReasonBreakdown(closed, 'won');
     const lostReasons = closeReasonBreakdown(closed, 'lost');
     const maxReason = Math.max(
       ...wonReasons.rows.map((r) => r.count), ...lostReasons.rows.map((r) => r.count), 1);
     const averages = avgClosedValue(closed);
-    const bySource = winRateBy(closed, (d) => store.contactById(d.contactId)?.source);
-    const byIndustry = winRateBy(closed, (d) => store.companyById(d.companyId)?.industry);
+    const bySource = winRateBy(closed, (d) => teamStore.contactById(d.contactId)?.source);
+    const byIndustry = winRateBy(closed, (d) => teamStore.companyById(d.companyId)?.industry);
 
     append(body, [
       el('div.stat-grid', { className: `stat-grid${coverage === null ? '' : ' wide'}` },
@@ -137,7 +137,7 @@ export function forecastView() {
         }),
         statTile({
           label: 'Best case',
-          value: compactMoney(pipelineValue(store.deals), currency),
+          value: compactMoney(pipelineValue(teamStore.deals), currency),
           sub: `${open.length} open deal${open.length === 1 ? '' : 's'}`,
         }),
         statTile({
@@ -157,7 +157,7 @@ export function forecastView() {
           forecastChart(rows, currency, { goal: goal.goal }),
           // Say it where the shape of the chart depends on it: a
           // subscription is not a spike in its close month.
-          store.deals.some(isRecurring) && el('p.settings-note.mt-sm', {},
+          teamStore.deals.some(isRecurring) && el('p.settings-note.mt-sm', {},
             'Recurring deals are spread across the months they bill, not booked whole in the month they close.')
         )
       ),
@@ -219,7 +219,7 @@ export function forecastView() {
          sell. Everything here is derived from stageHistory at render
          time. */
       (() => {
-        const cohortDeals = store.deals.filter((d) => matchesFunnelWindow(d, cohort));
+        const cohortDeals = teamStore.deals.filter((d) => matchesFunnelWindow(d, cohort));
         const funnel = funnelReport(cohortDeals, stageList);
         const worst = [...funnel.rows].sort((a, b) => b.lostHere - a.lostHere)[0];
         const anyJourney = funnel.rows.some((r) => r.entered > 0);
@@ -333,10 +333,10 @@ export function forecastView() {
   }
 
   const renderOnChange = keepingFocus(render);
-  store.addEventListener('change', renderOnChange);
+  teamStore.addEventListener('change', renderOnChange);
   render();
 
   root.append(pageHead('Forecast'), body);
-  root.destroy = () => store.removeEventListener('change', renderOnChange);
+  root.destroy = () => teamStore.removeEventListener('change', renderOnChange);
   return root;
 }

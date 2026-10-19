@@ -2,7 +2,7 @@ import { el, clear } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { toast } from '../ui/toast.js';
 import { confirmDialog, openModal } from '../ui/modal.js';
-import { store } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
 import {
   openStages, isTerminalStage, MAX_OPEN_STAGES, DEFAULT_STALE_DAYS,
 } from '../lib/forecast.js';
@@ -10,7 +10,7 @@ import { DEFAULT_COLD_DAYS } from '../lib/attention.js';
 import { normalizeTouchTargets, touchTarget } from '../lib/activity.js';
 import { aiAvailable } from '../lib/ai.js';
 import { openOfflineSheet, kvLabel } from '../ui/offline.js';
-import { ACTIVITY_TYPES } from '../lib/store.js';
+import { ACTIVITY_TYPES } from '../lib/team-context.js';
 import {
   CUSTOM_KINDS, FIELD_TYPES, MAX_CUSTOM_FIELDS, MAX_FIELD_NAME, MAX_FIELD_OPTIONS,
   MAX_OPTION_LENGTH, blankField, fieldTypeInfo, hasOptions, isBlankValue, retypeReport,
@@ -62,7 +62,7 @@ export function settingsView() {
   const themeGroup = el('div.seg-group', { role: 'group', 'aria-label': 'Theme' });
   function renderThemes() {
     clear(themeGroup);
-    const current = store.settings.theme || 'system';
+    const current = teamStore.settings.theme || 'system';
     for (const t of THEMES) {
       themeGroup.append(el('button.seg', {
         type: 'button',
@@ -71,7 +71,7 @@ export function settingsView() {
         html: icon(t.icon, 16, 2),
         onclick: (e) => {
           applyTheme(t.value);
-          store.updateSettings({ theme: t.value })
+          teamStore.updateSettings({ theme: t.value })
             .catch(() => toast('Couldn’t save. Check your connection', { icon: 'wifiOff' }));
           // Move the highlight in place instead of rebuilding the group -
           // a rebuild drops keyboard focus on the floor mid-interaction.
@@ -89,7 +89,7 @@ export function settingsView() {
   const currencySelect = el('select.select', {
     'aria-label': 'Currency',
     onchange: async (e) => {
-      const saved = store.updateSettings({ currency: e.target.value });
+      const saved = teamStore.updateSettings({ currency: e.target.value });
       // The goal field spells the currency out beside the number; it has to
       // follow, not wait for a reload.
       syncCurrencyLabels();
@@ -101,7 +101,7 @@ export function settingsView() {
       }
       toast('Currency updated');
     },
-  }, CURRENCIES.map((c) => el('option', { value: c, selected: c === store.settings.currency }, c)));
+  }, CURRENCIES.map((c) => el('option', { value: c, selected: c === teamStore.settings.currency }, c)));
 
   /* Controls that mirror a settings value, so a bulk replace (import,
      snapshot restore) can pull the whole page back in step. */
@@ -111,7 +111,7 @@ export function settingsView() {
   const stageRows = el('div.stage-edit-list');
 
   /** The editable part of the funnel as a fresh, mutable copy. */
-  const currentOpen = () => openStages(store.stages()).map((s) => ({ ...s }));
+  const currentOpen = () => openStages(teamStore.stages()).map((s) => ({ ...s }));
 
   /** Readable, collision-free id for a new stage ("Demo booked" → demo-booked). */
   function makeStageId(label, taken) {
@@ -125,7 +125,7 @@ export function settingsView() {
   /** Persist a structural change, then rebuild the editor (focus restored). */
   async function saveStages(list, { remap = {}, focus = null, message = null } = {}) {
     try {
-      const moved = await store.setStages(list, remap);
+      const moved = await teamStore.setStages(list, remap);
       renderStageRows(focus);
       if (message) toast(typeof message === 'function' ? message(moved) : message);
     } catch {
@@ -160,7 +160,7 @@ export function settingsView() {
   function renderStageRows(focus = null) {
     clear(stageRows);
     const open = currentOpen();
-    const probs = store.settings.stageProbabilities || {};
+    const probs = teamStore.settings.stageProbabilities || {};
 
     open.forEach((s, i) => {
       const override = probs[s.id];
@@ -191,8 +191,8 @@ export function settingsView() {
         onchange: async () => {
           const v = clamp(Math.round(Number(prob.value) || 0), 0, 100);
           prob.value = String(v);
-          await store.updateSettings({
-            stageProbabilities: { ...store.settings.stageProbabilities, [s.id]: v / 100 },
+          await teamStore.updateSettings({
+            stageProbabilities: { ...teamStore.settings.stageProbabilities, [s.id]: v / 100 },
           }).catch(() => toast('Couldn’t save. Check your connection', { icon: 'wifiOff' }));
         },
       });
@@ -225,7 +225,7 @@ export function settingsView() {
         disabled: open.length <= 1,
         title: open.length <= 1 ? 'A pipeline needs at least one open stage' : null,
         onclick: async () => {
-          const held = store.deals.filter((d) => d.stage === s.id);
+          const held = teamStore.deals.filter((d) => d.stage === s.id);
           const targets = open.filter((o) => o.id !== s.id);
           let remap = {};
           if (held.length) {
@@ -299,7 +299,7 @@ export function settingsView() {
             danger: false,
           });
           if (!ok) return;
-          await store.updateSettings({ stageProbabilities: {} }).catch(() => {});
+          await teamStore.updateSettings({ stageProbabilities: {} }).catch(() => {});
           await saveStages(null, { message: 'Stages reset to defaults' });
         },
       }, ' Reset to defaults')
@@ -329,7 +329,7 @@ export function settingsView() {
   const fieldRows = el('div.stage-edit-list.field-edit-list');
 
   /** The current definitions as a fresh, mutable copy. */
-  const currentFields = () => store.customFields(fieldKind)
+  const currentFields = () => teamStore.customFields(fieldKind)
     .map((f) => ({ ...f, ...(f.options ? { options: [...f.options] } : {}) }));
 
   /** Records of the kind being edited - what a type change has to convert. */
@@ -341,7 +341,7 @@ export function settingsView() {
 
   async function saveFields(list, { focus = null, message = null } = {}) {
     try {
-      const result = await store.setCustomFields(fieldKind, list);
+      const result = await teamStore.setCustomFields(fieldKind, list);
       renderFieldRows(focus);
       if (message) toast(typeof message === 'function' ? message(result) : message);
     } catch (err) {
@@ -546,7 +546,7 @@ export function settingsView() {
     const permission = notificationPermission();
     const blocked = permission === 'denied';
     const unsupported = permission === 'unsupported';
-    const on = !!store.settings.notifications && permission === 'granted';
+    const on = !!teamStore.settings.notifications && permission === 'granted';
 
     const toggle = el('button.switch', {
       type: 'button',
@@ -558,7 +558,7 @@ export function settingsView() {
       onclick: async () => {
         if (on) {
           try {
-            await store.updateSettings({ notifications: false });
+            await teamStore.updateSettings({ notifications: false });
           } catch {
             toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
           }
@@ -577,7 +577,7 @@ export function settingsView() {
         // persisted - a failed write here would quietly re-flip the
         // toggle on the next visit.
         try {
-          await store.updateSettings({ notifications: true });
+          await teamStore.updateSettings({ notifications: true });
         } catch {
           renderNotify();
           toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
@@ -608,7 +608,7 @@ export function settingsView() {
   function renderNudges() {
     const hadFocus = nudgeRow.contains(document.activeElement);
     clear(nudgeRow);
-    const on = store.settings.nextStepNudges !== false;
+    const on = teamStore.settings.nextStepNudges !== false;
     const toggle = el('button.switch', {
       type: 'button',
       role: 'switch',
@@ -617,7 +617,7 @@ export function settingsView() {
       className: `switch${on ? ' on' : ''}`,
       onclick: async () => {
         try {
-          await store.updateSettings({ nextStepNudges: !on });
+          await teamStore.updateSettings({ nextStepNudges: !on });
         } catch {
           toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
         }
@@ -644,7 +644,7 @@ export function settingsView() {
       const hadFocus = aiRow.contains(document.activeElement);
       clear(aiRow);
       const available = aiAvailable();
-      const on = available && store.settings.aiAssist !== false;
+      const on = available && teamStore.settings.aiAssist !== false;
       const toggle = el('button.switch', {
         type: 'button',
         role: 'switch',
@@ -654,9 +654,9 @@ export function settingsView() {
         disabled: !available,
         onclick: async () => {
           try {
-            await store.updateSettings({ aiAssist: !on });
+            await teamStore.updateSettings({ aiAssist: !on });
           } catch {
-            toast('Couldn't save. Check your connection', { icon: 'wifiOff' });
+            toast('Could not save. Check your connection', { icon: 'wifiOff' });
           }
           renderAI();
         },
@@ -685,15 +685,15 @@ export function settingsView() {
   function daysField(id, label, key, fallback, hint) {
     const input = el('input.input.prob-input', {
       id, type: 'number', min: '0', max: '365', step: '1',
-      value: String(store.settings[key] ?? fallback),
+      value: String(teamStore.settings[key] ?? fallback),
       onchange: async () => {
         const v = clamp(Math.round(Number(input.value) || 0), 0, 365);
         input.value = String(v);
-        await store.updateSettings({ [key]: v })
+        await teamStore.updateSettings({ [key]: v })
           .catch(() => toast('Couldn’t save. Check your connection', { icon: 'wifiOff' }));
       },
     });
-    settingsFields.push(() => { input.value = String(store.settings[key] ?? fallback); });
+    settingsFields.push(() => { input.value = String(teamStore.settings[key] ?? fallback); });
     return el('div.threshold-field', {},
       el('label.field-label.grow', { for: id }, label),
       input,
@@ -703,25 +703,25 @@ export function settingsView() {
   }
 
   /* ----- monthly revenue goal ----- */
-  const goalCurrency = el('span.goal-currency', {}, store.settings.currency);
+  const goalCurrency = el('span.goal-currency', {}, teamStore.settings.currency);
   const goalInput = el('input.input.goal-input', {
     // Whole currency units, for the same reason the stage percent above
     // takes them: a goal of 12,345 is saved as 12,345, and a step of 100
     // only made the control call it invalid.
     type: 'number', min: '0', step: '1', inputmode: 'decimal',
-    value: store.settings.revenueGoal ? String(store.settings.revenueGoal) : '',
+    value: teamStore.settings.revenueGoal ? String(teamStore.settings.revenueGoal) : '',
     placeholder: '0',
-    'aria-label': `Monthly revenue goal in ${store.settings.currency}`,
+    'aria-label': `Monthly revenue goal in ${teamStore.settings.currency}`,
     onchange: async () => {
       const v = Math.max(0, Math.round(Number(goalInput.value) || 0));
       goalInput.value = v ? String(v) : '';
       try {
-        await store.updateSettings({ revenueGoal: v });
+        await teamStore.updateSettings({ revenueGoal: v });
       } catch {
         toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
         return;
       }
-      toast(v ? `Goal set to ${formatMoney(v, store.settings.currency)}` : 'Goal cleared');
+      toast(v ? `Goal set to ${formatMoney(v, teamStore.settings.currency)}` : 'Goal cleared');
     },
   });
 
@@ -736,14 +736,14 @@ export function settingsView() {
     const id = `touch-${key}`;
     const input = el('input.input.prob-input.touch-input', {
       id, type: 'number', min: '0', max: '999', step: '1', inputmode: 'numeric',
-      value: normalizeTouchTargets(store.settings.touchTargets)[key] || '',
+      value: normalizeTouchTargets(teamStore.settings.touchTargets)[key] || '',
       placeholder: '0',
       onchange: async () => {
-        const next = normalizeTouchTargets(store.settings.touchTargets);
+        const next = normalizeTouchTargets(teamStore.settings.touchTargets);
         next[key] = clamp(Math.round(Number(input.value) || 0), 0, 999);
         input.value = next[key] || '';
         try {
-          await store.updateSettings({ touchTargets: next });
+          await teamStore.updateSettings({ touchTargets: next });
         } catch {
           toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
           return;
@@ -752,7 +752,7 @@ export function settingsView() {
       },
     });
     touchInputs.push(() => {
-      input.value = normalizeTouchTargets(store.settings.touchTargets)[key] || '';
+      input.value = normalizeTouchTargets(teamStore.settings.touchTargets)[key] || '';
     });
     return { id, input };
   }
@@ -781,8 +781,8 @@ export function settingsView() {
 
   const touchHint = el('p.settings-note.mt-sm');
   function syncTouchHint() {
-    const total = touchTarget(store.settings.touchTargets);
-    const targets = normalizeTouchTargets(store.settings.touchTargets);
+    const total = touchTarget(teamStore.settings.touchTargets);
+    const targets = normalizeTouchTargets(teamStore.settings.touchTargets);
     const perType = ACTIVITY_TYPES.filter((t) => targets[t.value] > 0)
       .map((t) => `${targets[t.value]} ${t.label.toLowerCase()}${targets[t.value] === 1 ? '' : 's'}`);
     touchHint.textContent = total
@@ -795,12 +795,12 @@ export function settingsView() {
   touchInputs.push(syncTouchHint);
 
   function syncCurrencyLabels() {
-    goalCurrency.textContent = store.settings.currency;
-    goalInput.setAttribute('aria-label', `Monthly revenue goal in ${store.settings.currency}`);
+    goalCurrency.textContent = teamStore.settings.currency;
+    goalInput.setAttribute('aria-label', `Monthly revenue goal in ${teamStore.settings.currency}`);
   }
 
   settingsFields.push(() => {
-    goalInput.value = store.settings.revenueGoal ? String(store.settings.revenueGoal) : '';
+    goalInput.value = teamStore.settings.revenueGoal ? String(teamStore.settings.revenueGoal) : '';
   });
 
   /**
@@ -809,7 +809,7 @@ export function settingsView() {
    * or it shows the previous account's thresholds until the next reload.
    */
   function syncSettingsUI() {
-    applyTheme(store.settings.theme || 'system');
+    applyTheme(teamStore.settings.theme || 'system');
     renderThemes();
     renderStageRows();
     renderFieldKinds();
@@ -817,7 +817,7 @@ export function settingsView() {
     renderNotify();
     renderNudges();
     renderAI();
-    currencySelect.value = store.settings.currency;
+    currencySelect.value = teamStore.settings.currency;
     syncCurrencyLabels();
     for (const sync of settingsFields) sync();
     for (const sync of touchInputs) sync();
@@ -856,13 +856,13 @@ export function settingsView() {
   const renderTemplates = () => refocusList(templatesList, buildTemplates);
   function buildTemplates() {
     clear(templatesList);
-    if (!store.templates.length) {
+    if (!teamStore.templates.length) {
       templatesList.append(el('p.card-empty', {},
         'The emails you send on repeat (cold intro, recap, check-in), written once and filled from the record you send them from.'));
       return;
     }
     templatesList.append(el('div.settings-list', {},
-      [...store.templates].sort((a, b) => a.name.localeCompare(b.name)).map((t) =>
+      [...teamStore.templates].sort((a, b) => a.name.localeCompare(b.name)).map((t) =>
         el('div.settings-row.static', {},
           el('span.row-ic', { html: icon('mail', 20, 1.8) }),
           el('div.grow.min0', {},
@@ -884,7 +884,7 @@ export function settingsView() {
               });
               if (!ok) return;
               try {
-                deletedToast('Template deleted', await store.deleteTemplate(t.id));
+                deletedToast('Template deleted', await teamStore.deleteTemplate(t.id));
               } catch {
                 toast('Couldn’t delete. Check your connection', { icon: 'wifiOff' });
               }
@@ -905,7 +905,7 @@ export function settingsView() {
   const renderPlaybooks = () => refocusList(playbooksList, buildPlaybooks);
   function buildPlaybooks() {
     clear(playbooksList);
-    const books = store.playbooks();
+    const books = teamStore.playbooks();
     // The cap is reached by adding one, so the button has to answer for
     // itself on every render rather than at page build time.
     newPlaybookBtn.disabled = books.length >= MAX_PLAYBOOKS;
@@ -916,7 +916,7 @@ export function settingsView() {
         'No playbooks yet. Save the steps you run after a demo - recap the same day, nudge in three days, check in after two weeks - and apply them to a lead or deal in one click.'));
       return;
     }
-    const stages = store.stages();
+    const stages = teamStore.stages();
     playbooksList.append(el('div.settings-list', {}, books.map((book) => {
       const stage = book.trigger && stages.find((s) => s.id === book.trigger);
       return el('div.settings-row.static', {},
@@ -942,7 +942,7 @@ export function settingsView() {
     refocusList(tagsList, buildTags, renamedTo && `Rename tag ${renamedTo}`);
   function buildTags() {
     clear(tagsList);
-    const all = store.allTags();
+    const all = teamStore.allTags();
     if (!all.length) {
       tagsList.append(el('p.card-empty', {},
         'No tags yet. Add them on a lead, company, or deal to slice your book any way a fixed field can’t.'));
@@ -956,7 +956,7 @@ export function settingsView() {
           const next = name.value.trim();
           if (!next || next === t.name) { name.value = t.name; return; }
           try {
-            const n = await store.renameTag(t.name, next);
+            const n = await teamStore.renameTag(t.name, next);
             toast(`Tag renamed on ${n} record${n === 1 ? '' : 's'}`);
           } catch {
             toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
@@ -981,7 +981,7 @@ export function settingsView() {
             });
             if (!ok) return;
             try {
-              await store.deleteTag(t.name);
+              await teamStore.deleteTag(t.name);
               toast('Tag deleted', { icon: 'trash' });
             } catch {
               toast('Couldn’t delete. Check your connection', { icon: 'wifiOff' });
@@ -999,17 +999,17 @@ export function settingsView() {
   /** Undo the last bulk replace by swapping the snapshot back in. */
   async function undoBulk() {
     try {
-      await store.restoreBackup();
+      await teamStore.restoreBackup();
       syncSettingsUI();
       toast('Previous data restored', { icon: 'undo' });
     } catch {
-      toast('Couldn’t restore. Check your connection', { icon: 'wifiOff' });
+      toast('Couldn’t reteamStore. Check your connection', { icon: 'wifiOff' });
     }
   }
 
   function exportData() {
     downloadFile(`crm-export-${todayISO()}.json`,
-      JSON.stringify(store.exportAll(), null, 2), 'application/json');
+      JSON.stringify(teamStore.exportAll(), null, 2), 'application/json');
     toast('Export downloaded', { icon: 'fileDown' });
   }
 
@@ -1028,9 +1028,9 @@ export function settingsView() {
         confirmLabel: 'Import and replace',
       });
       if (!ok) return;
-      const hadData = store.hasData();
+      const hadData = teamStore.hasData();
       try {
-        await store.importAll(data);
+        await teamStore.importAll(data);
         // The file's settings replace the current ones; reflect them in
         // the app and this view now rather than on the next full reload.
         syncSettingsUI();
@@ -1052,12 +1052,12 @@ export function settingsView() {
       title: 'Load sample data?',
       message: 'Your current data is replaced with a demo pipeline you can explore. A snapshot is kept first, so you can bring your data back.',
       confirmLabel: 'Load sample data',
-      danger: store.contacts.length > 0 || store.deals.length > 0,
+      danger: teamStore.contacts.length > 0 || teamStore.deals.length > 0,
     });
     if (!ok) return;
-    const hadData = store.hasData();
+    const hadData = teamStore.hasData();
     try {
-      await store.importAll(sampleDataset(store), { reason: 'sample' });
+      await teamStore.importAll(sampleDataset(store), { reason: 'sample' });
       syncSettingsUI();
       toast('Sample data loaded', {
         icon: 'sparkle',
@@ -1075,14 +1075,14 @@ export function settingsView() {
       confirmLabel: 'Erase everything',
     });
     if (!ok) return;
-    const hadData = store.hasData();
+    const hadData = teamStore.hasData();
     try {
-      await store.importAll({
+      await teamStore.importAll({
         app: 'crm', version: 1,
-        settings: { ...store.settings, onboarded: false, sampleData: false },
+        settings: { ...teamStore.settings, onboarded: false, sampleData: false },
         companies: [], contacts: [], deals: [], activities: [], tasks: [],
       }, { reason: 'erase' });
-      await store.emptyTrash();
+      await teamStore.emptyTrash();
       syncSettingsUI();
       toast('All data erased', {
         icon: 'trash',
@@ -1107,13 +1107,13 @@ export function settingsView() {
   let syncRenderId = 0;
   async function renderSync() {
     const id = ++syncRenderId;
-    const pending = await store.pendingWrites().catch(() => []);
+    const pending = await teamStore.pendingWrites().catch(() => []);
     if (id !== syncRenderId) return;
     clear(syncRow);
     const conflicts = pending.filter((row) => row.conflict);
     if (!pending.length) {
       syncRow.append(el('p.card-empty', {},
-        store.offline.offline
+        teamStore.offline.offline
           ? 'Working offline. Everything you have changed is already in your cloud; anything you change now is kept here and sent when it answers.'
           : 'Everything is in your PocketBase cloud. Changes made offline wait here until it answers.'));
       return;
@@ -1139,7 +1139,7 @@ export function settingsView() {
   }
   renderSync();
   const onOffline = () => { renderSync(); };
-  store.addEventListener('offline', onOffline);
+  teamStore.addEventListener('offline', onOffline);
 
   /* ----- automatic cloud backups ----- */
   const cloudBackups = el('div');
@@ -1158,9 +1158,9 @@ export function settingsView() {
       confirmLabel: 'Restore backup',
     });
     if (!ok) return;
-    const hadData = store.hasData();
+    const hadData = teamStore.hasData();
     try {
-      await store.importAll(data, { reason: 'cloud-backup' });
+      await teamStore.importAll(data, { reason: 'cloud-backup' });
       syncSettingsUI();
       toast('Backup restored', {
         icon: 'undo',
@@ -1258,13 +1258,13 @@ export function settingsView() {
     // focus; hand it to the next actionable control rather than the body.
     const hadFocus = trashSection.contains(document.activeElement);
     clear(trashSection);
-    if (!store.trash.length) {
+    if (!teamStore.trash.length) {
       trashSection.append(el('p.card-empty', {},
         'Nothing deleted recently. Deleted records wait here for 30 days before they go for good.'));
       return;
     }
     trashSection.append(
-      el('div.settings-list', {}, store.trash.map((entry) => {
+      el('div.settings-list', {}, teamStore.trash.map((entry) => {
         const kind = TRASH_KINDS[entry.kind] || { icon: 'inbox', label: 'Record' };
         return el('div.settings-row.static', {},
           el('span.row-ic', { html: icon(kind.icon, 20, 1.8) }),
@@ -1277,10 +1277,10 @@ export function settingsView() {
             html: icon('undo', 14, 2),
             onclick: async () => {
               try {
-                await store.restoreTrash(entry.id);
+                await teamStore.restoreTrash(entry.id);
                 toast(`${kind.label} restored`, { icon: 'undo' });
               } catch {
-                toast('Couldn’t restore. Check your connection', { icon: 'wifiOff' });
+                toast('Couldn’t reteamStore. Check your connection', { icon: 'wifiOff' });
               }
               renderTrash();
             },
@@ -1292,7 +1292,7 @@ export function settingsView() {
           type: 'button',
           html: icon('trash', 14, 2),
           onclick: async () => {
-            const n = store.trash.length;
+            const n = teamStore.trash.length;
             const ok = await confirmDialog({
               title: 'Empty the trash?',
               message: `${n} deleted record${n === 1 ? '' : 's'} will be gone for good. This cannot be undone.`,
@@ -1300,7 +1300,7 @@ export function settingsView() {
             });
             if (!ok) return;
             try {
-              await store.emptyTrash();
+              await teamStore.emptyTrash();
               toast('Trash emptied', { icon: 'trash' });
             } catch {
               toast('Couldn’t empty. Check your connection', { icon: 'wifiOff' });
@@ -1318,15 +1318,15 @@ export function settingsView() {
   const backupRow = el('div');
   function renderBackup() {
     clear(backupRow);
-    if (!store.backup) return;
-    const when = timeAgo(store.backup.at);
+    if (!teamStore.backup) return;
+    const when = timeAgo(teamStore.backup.at);
     const why = {
       sample: 'loading sample data',
       erase: 'erasing everything',
       restore: 'the last restore',
       wipe: 'clearing the sample data',
       'cloud-backup': 'restoring a cloud backup',
-    }[store.backup.reason] || 'the last import';
+    }[teamStore.backup.reason] || 'the last import';
     backupRow.append(dataRow('undo', 'Restore previous data',
       `Snapshot taken ${when}, before ${why}`, async () => {
         const ok = await confirmDialog({
@@ -1337,11 +1337,11 @@ export function settingsView() {
         });
         if (!ok) return;
         try {
-          await store.restoreBackup();
+          await teamStore.restoreBackup();
           syncSettingsUI();
           toast('Previous data restored', { icon: 'undo' });
         } catch {
-          toast('Couldn’t restore. Check your connection', { icon: 'wifiOff' });
+          toast('Couldn’t reteamStore. Check your connection', { icon: 'wifiOff' });
         }
       }));
   }
@@ -1357,7 +1357,7 @@ export function settingsView() {
     );
 
   /* ----- account ----- */
-  const username = store.user?.username || 'PocketBase user';
+  const username = teamStore.user?.username || 'PocketBase user';
   const accountRows = el('div.settings-list', {},
     el('div.settings-row.static', {},
       el('span.avatar', {}, username.charAt(0).toUpperCase()),
@@ -1374,7 +1374,7 @@ export function settingsView() {
 
   /* Trash and the snapshot row change from outside this page's own buttons
      - a CSV import writes a new snapshot, a toast Undo restores a trash
-     entry - so they follow the store. Only these two: re-rendering the
+     entry - so they follow the teamStore. Only these two: re-rendering the
      input-bearing sections on every save would steal focus mid-edit. */
   const syncPassive = () => {
     renderTrash();
@@ -1383,10 +1383,10 @@ export function settingsView() {
     // and a template restored from the trash reappears without a reload.
     renderTemplates();
   };
-  store.addEventListener('change', syncPassive);
+  teamStore.addEventListener('change', syncPassive);
   root.destroy = () => {
-    store.removeEventListener('change', syncPassive);
-    store.removeEventListener('offline', onOffline);
+    teamStore.removeEventListener('change', syncPassive);
+    teamStore.removeEventListener('offline', onOffline);
   };
 
   root.append(

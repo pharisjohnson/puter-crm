@@ -5,7 +5,7 @@ import { icon } from './icons.js';
 import { toast } from './toast.js';
 import { openModal } from './modal.js';
 import { maybeNudgeNextStep } from './nudge.js';
-import { store, activityTypeInfo, repeatLabel } from '../lib/store.js';
+import { teamStore, activityTypeInfo, repeatLabel } from '../lib/team-context.js';
 import { stageInfo, openStages, isTerminalStage } from '../lib/forecast.js';
 import {
   initials, dueLabel, formatDate, formatMoney, formatClock, todayISO, addDays,
@@ -208,7 +208,7 @@ export function openSnoozeSheet(task, {
   const apply = async (due) => {
     modal.close();
     try {
-      await store.updateTask(task.id, { due });
+      await teamStore.updateTask(task.id, { due });
     } catch {
       toast('Couldn’t save. Check your connection', { icon: 'wifiOff' });
       return;
@@ -217,7 +217,7 @@ export function openSnoozeSheet(task, {
       icon: 'snooze',
       action: {
         label: 'Undo',
-        onClick: () => store.updateTask(task.id, prev)
+        onClick: () => teamStore.updateTask(task.id, prev)
           .catch(() => toast('Couldn’t undo. Check your connection', { icon: 'wifiOff' })),
       },
     });

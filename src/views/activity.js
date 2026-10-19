@@ -1,6 +1,6 @@
 import { el, clear, keepingFocus } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { store, ACTIVITY_TYPES } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete, ACTIVITY_TYPES } from '../lib/team-context.js';
 import { fuzzyIncludes, formatDate } from '../lib/util.js';
 import {
   ACTIVITY_WINDOWS, matchesActivityWindow, touchProgress, weekRange,
@@ -50,7 +50,7 @@ export function activityView() {
   /** Only the records something has actually been logged against. */
   function linkOptions() {
     const seen = { contacts: new Set(), companies: new Set(), deals: new Set() };
-    for (const a of store.activities) {
+    for (const a of teamStore.activities) {
       if (a.contactId) seen.contacts.add(a.contactId);
       if (a.companyId) seen.companies.add(a.companyId);
       if (a.dealId) seen.deals.add(a.dealId);
@@ -63,9 +63,9 @@ export function activityView() {
       return options.length ? { label, options } : null;
     };
     return [
-      group('Leads', 'contact', seen.contacts, (id) => store.contactById(id)?.name),
-      group('Deals', 'deal', seen.deals, (id) => store.dealById(id)?.name),
-      group('Companies', 'company', seen.companies, (id) => store.companyById(id)?.name),
+      group('Leads', 'contact', seen.contacts, (id) => teamStore.contactById(id)?.name),
+      group('Deals', 'deal', seen.deals, (id) => teamStore.dealById(id)?.name),
+      group('Companies', 'company', seen.companies, (id) => teamStore.companyById(id)?.name),
     ].filter(Boolean);
   }
 
@@ -84,9 +84,9 @@ export function activityView() {
     && (!query
       || fuzzyIncludes(a.summary, query)
       || fuzzyIncludes(a.notes, query)
-      || fuzzyIncludes(store.contactById(a.contactId)?.name, query)
-      || fuzzyIncludes(store.dealById(a.dealId)?.name, query)
-      || fuzzyIncludes(store.companyById(a.companyId)?.name, query));
+      || fuzzyIncludes(teamStore.contactById(a.contactId)?.name, query)
+      || fuzzyIncludes(teamStore.dealById(a.dealId)?.name, query)
+      || fuzzyIncludes(teamStore.companyById(a.companyId)?.name, query));
 
   /* A control that rebuilds its own row hands the keyboard back afterwards,
      the way the other list views do. */
@@ -148,8 +148,8 @@ export function activityView() {
   /** This week against the touch target - the leading number, up top. */
   function renderTargets() {
     clear(targets);
-    const progress = touchProgress(store.activities, store.settings.touchTargets);
-    if (!progress.pace || !store.activities.length) return;
+    const progress = touchProgress(teamStore.activities, teamStore.settings.touchTargets);
+    if (!progress.pace || !teamStore.activities.length) return;
     const { from, to } = weekRange();
     targets.append(el('div.stat-grid', { className: 'stat-grid wide' },
       statTile({
@@ -183,9 +183,9 @@ export function activityView() {
 
   function render() {
     clear(body);
-    controls.hidden = !store.activities.length;
+    controls.hidden = !teamStore.activities.length;
 
-    if (!store.activities.length) {
+    if (!teamStore.activities.length) {
       body.append(emptyState({
         icon: 'video',
         title: 'Nothing logged yet',
@@ -195,7 +195,7 @@ export function activityView() {
       return;
     }
 
-    const rows = store.activities
+    const rows = teamStore.activities
       .filter(matches)
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
 
@@ -246,7 +246,7 @@ export function activityView() {
     renderTargets();
     render();
   });
-  store.addEventListener('change', renderOnChange);
+  teamStore.addEventListener('change', renderOnChange);
 
   root.append(
     pageHead('Activity',
@@ -258,6 +258,6 @@ export function activityView() {
     controls,
     body
   );
-  root.destroy = () => store.removeEventListener('change', renderOnChange);
+  root.destroy = () => teamStore.removeEventListener('change', renderOnChange);
   return root;
 }

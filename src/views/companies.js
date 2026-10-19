@@ -1,6 +1,6 @@
 import { el, clear, append, keepingFocus } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { store } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
 import { fuzzyIncludes, timeAgo, formatDate, todayISO } from '../lib/util.js';
 import {
   pageHead, emptyState, avatar, searchBox, stageBadge,
@@ -103,7 +103,7 @@ function companiesList(params) {
       {
         icon: 'fileDown', label: 'Export',
         onClick: () => {
-          const records = store.companies.filter((c) => selection.has(c.id));
+          const records = teamStore.companies.filter((c) => selection.has(c.id));
           downloadFile(`crm-companies-selection-${todayISO()}.csv`,
             `﻿${exportRecords('companies', records, exportContext())}`, 'text/csv');
           toast(`${records.length} compan${records.length === 1 ? 'y' : 'ies'} exported`, { icon: 'fileDown' });
@@ -151,8 +151,8 @@ function companiesList(params) {
     clear(listWrap);
     clear(bulkWrap);
     renderViews();
-    controls.hidden = !store.companies.length;
-    if (!store.companies.length) {
+    controls.hidden = !teamStore.companies.length;
+    if (!teamStore.companies.length) {
       listWrap.append(emptyState({
         icon: 'company',
         title: 'No companies yet',
@@ -162,15 +162,15 @@ function companiesList(params) {
       return;
     }
 
-    const fields = store.customFields('companies');
-    const rows = [...store.companies]
+    const fields = teamStore.customFields('companies');
+    const rows = [...teamStore.companies]
       .filter((c) => !query || fuzzyIncludes(c.name, query) || fuzzyIncludes(c.industry, query))
       .filter((c) => tagsFilter.every((t) => hasTag(c.tags, t)))
       .filter((c) => matchesCustomFilters(c, fields, fieldFilters))
       .sort((a, b) => a.name.localeCompare(b.name));
     const activeFields = activeFieldFilters(fields, fieldFilters);
 
-    selection.prune(store.companies.map((c) => c.id));
+    selection.prune(teamStore.companies.map((c) => c.id));
     const order = rows.map((c) => c.id);
     append(bulkWrap, [bulkBar(selection, { total: order.length, order, actions: bulkActions() })]);
 
@@ -196,8 +196,8 @@ function companiesList(params) {
 
     listWrap.append(el('div.card.list-card', {},
       rows.map((c) => {
-        const people = store.contactsOf(c.id).length;
-        const deals = store.dealsFor({ companyId: c.id });
+        const people = teamStore.contactsOf(c.id).length;
+        const deals = teamStore.dealsFor({ companyId: c.id });
         const open = pipelineValue(deals);
         return selectableRow(selectBox(selection, c.id, order, c.name),
           el('a.person-row', { href: `#/companies?id=${c.id}` },
@@ -226,12 +226,12 @@ function companiesList(params) {
   }
   renderList();
   let vocabulary = tagVocabulary('companies');
-  let fieldsSig = fieldSignature(store.customFields('companies'));
+  let fieldsSig = fieldSignature(teamStore.customFields('companies'));
   const rerender = () => {
     // A tag or custom field added while this list is open belongs in its
     // filter row; only a real change rebuilds the row.
     const next = tagVocabulary('companies');
-    const nextFields = fieldSignature(store.customFields('companies'));
+    const nextFields = fieldSignature(teamStore.customFields('companies'));
     if (next !== vocabulary || nextFields !== fieldsSig) {
       vocabulary = next;
       fieldsSig = nextFields;
@@ -240,7 +240,7 @@ function companiesList(params) {
     renderList();
   };
   const rerenderOnChange = keepingFocus(rerender);
-  store.addEventListener('change', rerenderOnChange);
+  teamStore.addEventListener('change', rerenderOnChange);
 
   root.append(
     pageHead('Companies',
@@ -264,7 +264,7 @@ function companyDetail(id) {
 
   function render() {
     clear(body);
-    const company = store.companyById(id);
+    const company = teamStore.companyById(id);
     if (!company) {
       body.append(emptyState({
         icon: 'company', title: 'Company not found',
@@ -274,8 +274,8 @@ function companyDetail(id) {
       return;
     }
 
-    const people = store.contactsOf(id).sort((a, b) => a.name.localeCompare(b.name));
-    const deals = store.dealsFor({ companyId: id }).sort((a, b) => b.updatedAt - a.updatedAt);
+    const people = teamStore.contactsOf(id).sort((a, b) => a.name.localeCompare(b.name));
+    const deals = teamStore.dealsFor({ companyId: id }).sort((a, b) => b.updatedAt - a.updatedAt);
     const history = store.activitiesFor({ companyId: id });
     const openValue = pipelineValue(deals);
 
@@ -368,7 +368,7 @@ function companyDetail(id) {
                 el('div.person-sub', {}, d.expectedClose && isOpen(d)
                   ? `Expected ${formatDate(d.expectedClose)}` : `Updated ${timeAgo(d.updatedAt)}`)
               ),
-              el('span.deal-row-value', {}, rateText(d, store.settings.currency)),
+              el('span.deal-row-value', {}, rateText(d, teamStore.settings.currency)),
               stageBadge(d.stage)
             )))
           : el('p.card-empty', {}, 'No deals with this company yet.')

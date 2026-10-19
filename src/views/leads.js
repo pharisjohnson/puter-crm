@@ -1,6 +1,7 @@
 import { el, clear, append, keepingFocus } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { store, CONTACT_STATUSES } from '../lib/store.js';
+import { teamStore, getOwnershipInfo, canCreate, canUpdate, canDelete } from '../lib/team-context.js';
+import { CONTACT_STATUSES } from '../lib/store.js';
 import { fuzzyIncludes, timeAgo, formatDate, sinceLabel, todayISO } from '../lib/util.js';
 import { goingCold } from '../lib/attention.js';
 import {
@@ -57,7 +58,7 @@ function filterLabel(value) {
  * threshold, so the list itself shows who is drifting.
  */
 function lastTouchNote(contact, coldDays) {
-  const lastAt = store.lastContactedAt(contact.id);
+  const lastAt = teamStore.lastContactedAt(contact.id);
   const since = lastAt || todayISO(new Date(contact.createdAt));
   const { text, days } = sinceLabel(since);
   // Only the statuses worth chasing go amber - a customer you spoke to in
@@ -175,7 +176,7 @@ function leadsList(params) {
       {
         icon: 'fileDown', label: 'Export',
         onClick: () => {
-          const records = store.contacts.filter((c) => selection.has(c.id));
+          const records = teamStore.contacts.filter((c) => selection.has(c.id));
           downloadFile(`crm-leads-selection-${todayISO()}.csv`,
             `﻿${exportRecords('contacts', records, exportContext())}`, 'text/csv');
           toast(`${records.length} lead${records.length === 1 ? '' : 's'} exported`, { icon: 'fileDown' });
@@ -235,7 +236,7 @@ function leadsList(params) {
     clear(listWrap);
     clear(bulkWrap);
     renderViews();
-    controls.hidden = !store.contacts.length;
+    controls.hidden = !teamStore.contacts.length;
     // A quiet pointer, not a banner campaign: duplicates corrupt exactly
     // the signals this list runs on (last touch, going cold).
     //
@@ -245,7 +246,7 @@ function leadsList(params) {
     // it groups - which was being spent per keystroke to fill a hint that a
     // non-empty query hides anyway.
     if (statusFilter === 'all' && !query) {
-      const dupePairs = contactDuplicates(store.contacts).length;
+      const dupePairs = contactDuplicates(teamStore.contacts).length;
       if (dupePairs > 0) {
         listWrap.append(el('div.dupe-hint', {},
           el('span', { html: icon('merge', 14, 2), 'aria-hidden': 'true' }),
@@ -254,7 +255,7 @@ function leadsList(params) {
         ));
       }
     }
-    if (!store.contacts.length) {
+    if (!teamStore.contacts.length) {
       listWrap.append(emptyState({
         icon: 'users',
         title: 'No leads yet',
@@ -264,29 +265,29 @@ function leadsList(params) {
       return;
     }
 
-    const coldDays = store.settings.coldDays;
-    const fields = store.customFields('contacts');
+    const coldDays = teamStore.settings.coldDays;
+    const fields = teamStore.customFields('contacts');
     const matchesQuery = (c) => (!query
       || fuzzyIncludes(c.name, query)
       || fuzzyIncludes(c.email, query)
-      || fuzzyIncludes(store.companyById(c.companyId)?.name, query))
+      || fuzzyIncludes(teamStore.companyById(c.companyId)?.name, query))
       && tagsFilter.every((t) => hasTag(c.tags, t))
       && matchesCustomFilters(c, fields, fieldFilters);
 
     let rows;
     if (statusFilter === 'cold') {
       // Coldest first: the point of the view is the top of the list.
-      rows = goingCold(store.contacts, (id) => store.lastContactedAt(id), { coldDays })
+      rows = goingCold(teamStore.contacts, (id) => teamStore.lastContactedAt(id), { coldDays })
         .map((r) => r.contact)
         .filter(matchesQuery);
     } else {
-      rows = [...store.contacts]
+      rows = [...teamStore.contacts]
         .filter((c) => statusFilter === 'all' || c.status === statusFilter)
         .filter(matchesQuery)
         .sort((a, b) => a.name.localeCompare(b.name));
     }
 
-    selection.prune(store.contacts.map((c) => c.id));
+    selection.prune(teamStore.contacts.map((c) => c.id));
     const order = rows.map((c) => c.id);
     append(bulkWrap, [bulkBar(selection, { total: order.length, order, actions: bulkActions() })]);
 
@@ -328,9 +329,10 @@ function leadsList(params) {
 
     listWrap.append(el('div.card.list-card', {},
       rows.map((c) => {
-        const company = store.companyById(c.companyId);
-        const openDeals = store.dealsFor({ contactId: c.id }).filter(isOpen);
+        const company = teamStore.companyById(c.companyId);
+        const openDeals = teamStore.dealsFor({ contactId: c.id }).filter(isOpen);
         const touch = lastTouchNote(c, coldDays);
+        const ownership = getOwnershipInfo(c);
         return selectableRow(selectBox(selection, c.id, order, c.name),
           el('a.person-row', { href: `#/leads?id=${c.id}` },
           avatar(c.name),
@@ -343,6 +345,7 @@ function leadsList(params) {
             `${openDeals.length} open deal${openDeals.length === 1 ? '' : 's'}`),
           touch,
           statusBadge(c.status),
+          ownership.label && el('span.ownership-badge', { className: ownership.className }, ownership.label),
           el('span.row-chev', { html: icon('chevR', 18) })
         ));
       })
@@ -360,13 +363,13 @@ function leadsList(params) {
   }
   renderList();
   let vocabulary = tagVocabulary('contacts');
-  let fieldsSig = fieldSignature(store.customFields('contacts'));
+  let fieldsSig = fieldSignature(teamStore.customFields('contacts'));
   const rerender = () => {
     // A tag or a custom field added while this list is open belongs in its
     // filter row - and only a real change rebuilds it, so the search box
     // isn't replaced under the caret on every unrelated save.
     const next = tagVocabulary('contacts');
-    const nextFields = fieldSignature(store.customFields('contacts'));
+    const nextFields = fieldSignature(teamStore.customFields('contacts'));
     if (next !== vocabulary || nextFields !== fieldsSig) {
       vocabulary = next;
       fieldsSig = nextFields;
@@ -375,14 +378,14 @@ function leadsList(params) {
     renderList();
   };
   const rerenderOnChange = keepingFocus(rerender);
-  store.addEventListener('change', rerenderOnChange);
+  teamStore.addEventListener('change', rerenderOnChange);
 
   root.append(
     pageHead('Leads',
-      el('button.btn.btn-primary', {
+      canCreate('contacts') ? el('button.btn.btn-primary', {
         html: icon('userPlus', 16, 2),
         onclick: () => openContactForm(),
-      }, ' New lead')),
+      }, ' New lead') : null),
     controls,
     listWrap,
     bulkWrap
@@ -393,8 +396,8 @@ function leadsList(params) {
 
 /** The same signal on the detail page, spelled out. */
 function lastTouchChip(contact) {
-  const coldDays = store.settings.coldDays;
-  const lastAt = store.lastContactedAt(contact.id);
+  const coldDays = teamStore.settings.coldDays;
+  const lastAt = teamStore.lastContactedAt(contact.id);
   const since = lastAt || todayISO(new Date(contact.createdAt));
   const { text, days } = sinceLabel(since);
   const cold = coldDays > 0 && days >= coldDays
@@ -423,8 +426,8 @@ function leadDetail(id) {
       return;
     }
 
-    const company = store.companyById(contact.companyId);
-    const deals = store.dealsFor({ contactId: id }).sort((a, b) => b.updatedAt - a.updatedAt);
+    const company = teamStore.companyById(contact.companyId);
+    const deals = teamStore.dealsFor({ contactId: id }).sort((a, b) => b.updatedAt - a.updatedAt);
     const tasks = store.tasksFor({ contactId: id });
     const history = store.activitiesFor({ contactId: id });
 
@@ -517,7 +520,7 @@ function leadDetail(id) {
               // several people on it.
               roleOf(d, id) && el('span.role-badge', { dataset: { role: roleOf(d, id) } },
                 roleLabel(roleOf(d, id))),
-              el('span.deal-row-value', {}, rateText(d, store.settings.currency)),
+              el('span.deal-row-value', {}, rateText(d, teamStore.settings.currency)),
               stageBadge(d.stage)
             )))
           : el('p.card-empty', {}, 'No deals with this lead yet.')

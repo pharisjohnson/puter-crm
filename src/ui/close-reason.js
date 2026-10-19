@@ -10,7 +10,7 @@ import { el } from './dom.js';
 import { icon } from './icons.js';
 import { openModal } from './modal.js';
 import { toast } from './toast.js';
-import { store } from '../lib/store.js';
+import { teamStore } from '../lib/team-context.js';
 import { reasonsForStage } from '../lib/forecast.js';
 
 /**
@@ -77,7 +77,7 @@ export function openCloseReasonForm(deal, { onClose = null, confirm = true } = {
     const btn = form.querySelector('button[type="submit"]');
     btn.disabled = true;
     try {
-      await store.updateDeal(deal.id, {
+      await teamStore.updateDeal(deal.id, {
         closeReason: picked,
         closeReasonNote: note.value.trim(),
       });
