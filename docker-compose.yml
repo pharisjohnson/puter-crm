@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  pocketbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.pocketbase
+    container_name: crm-pocketbase
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pocketbase-data:/pb_data
+      - ./pocketbase-public:/pb_public
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2
+    container_name: crm-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./pocketbase-public:/var/www/html
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - pocketbase
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:
