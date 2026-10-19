@@ -2,9 +2,7 @@
 
 A CRM and sales pipeline for founders who do their own selling: leads,
 companies, deal stages, follow-ups, meeting history, and sales forecasts.
-Built with vanilla JavaScript on [Puter](https://developer.puter.com), so all
-data lives in the signed-in user's own Puter cloud. No app server, no database
-to run.
+Self-hosted on PocketBase — your data, your server.
 
 ## Features
 
@@ -66,7 +64,7 @@ to run.
 - **Activity log.** Every touch in one place, newest first, with filters
   for type, date window, and the record it was logged against, plus search
   over what you wrote. Set a weekly touch target in Settings - overall or
-  per type ("8 calls, 3 meetings") - and the log and the dashboard track
+  per type ("8 calls, 3 meetings") - the log and the dashboard track
   this week against it, with pace for the day of the week.
 - **Win/loss reasons.** Closing a deal asks why (skippable in one click),
   and the Forecast page turns those answers into a report: why deals close,
@@ -107,14 +105,10 @@ to run.
 - Light, dark, and system themes (system is the default). Responsive,
   app-like layout: sidebar on desktop, tab bar and floating action button on
   mobile.
-- **AI assist, on Puter's own models.** Three buttons, each one pressed on
-  purpose: paste a signature or some scribbles into a new lead or company
-  and have the fields read out of it, draft a first pass of an email into
-  the same editable body a template fills, and catch up on a long history.
-  Every result lands in a field you can edit and nothing is saved on its
-  own. One switch in Settings turns it all off, and it stays off wherever
-  `puter.ai` isn't available - the record you press a button on is the only
-  thing that ever leaves your own cloud.
+- **AI assist** (optional). Three buttons: paste a signature/scribbles into
+  a new lead or company and have fields extracted, draft an email from a
+  template, or summarize a long history. Every result lands in an editable
+  field — nothing is saved automatically.
 - **CSV in and out.** Import leads, companies, or deals from a spreadsheet
   with auto-detected column mapping, a preview, and merge-by-email (or by
   name) so a re-import updates instead of duplicating. Deal billing and
@@ -126,7 +120,7 @@ to run.
 - **Works with no connection.** A service worker caches the app shell, so
   an installed copy launches offline instead of showing nothing, and every
   collection keeps a durable local copy in IndexedDB - so a cold start with
-  no network opens your own data. A write the cloud won't take is queued
+  no network opens your own data. A write the server won't take is queued
   and replayed when it answers: the shell says "waiting to sync", Settings
   lists what is still on its way, and a save that landed locally says so
   rather than claiming more. If another device changed the same collection
@@ -137,11 +131,20 @@ to run.
   Import, sample-data load, and erase take a one-slot snapshot first, so a
   bad bulk operation is one click from being reversed.
 
+## Collaboration
+
+- **Teams & roles.** Create teams, invite members with roles (owner, admin,
+  member, viewer). All data is scoped to the active team.
+- **Real-time presence.** See who's viewing a deal or contact in real time.
+- **Comments & mentions.** Threaded comments on deals and activities with
+  @mention autocomplete for team members.
+- **Live updates.** Changes sync instantly across team members via
+  PocketBase realtime subscriptions.
+
 ## Stack
 
 - [Vite](https://vite.dev) for dev server and build
-- [Puter.js](https://docs.puter.com) for auth, key-value storage, files,
-  and (optionally) the built-in AI models
+- [PocketBase](https://pocketbase.io) for auth, database, file storage, realtime
 - [Lucide](https://lucide.dev) for icons
 - [Vitest](https://vitest.dev) for tests
 - No frontend framework
@@ -150,30 +153,42 @@ to run.
 
 ```sh
 npm install
-npm run dev        # dev server
+npm run dev:pb     # dev server with PocketBase proxy
 npm test           # run the test suite
-npm run build      # production build to dist/
+npm run build:pb   # production build to dist/
 ```
 
-The real app (`index.html`) requires a Puter session. For local development
-without one, open `/mock.html`, which loads `dev/puter-mock.js`: an in-memory
-Puter SDK mock persisted to localStorage. `/dev/phone.html` wraps the mock in
-a 390px iframe for quick phone-size checks. Neither is part of the production
-build.
+Or with Docker:
+
+```sh
+docker-compose up -d --build
+# Open http://localhost/
+```
+
+## Deployment
+
+Self-host on any VPS with Docker. Caddy handles HTTPS automatically.
+
+```sh
+docker-compose up -d
+```
+
+Point your domain to the VPS IP — Caddy provisions Let's Encrypt certificates.
 
 ## Storage
 
-Everything lives in Puter KV, one key per collection (`crm:settings:v1`,
-`crm:companies:v1`, `crm:contacts:v1`, `crm:deals:v1`, `crm:activities:v1`,
-`crm:tasks:v1`), plus `crm:trash:v1` for 30-day undo and `crm:backup:v1`
-for the pre-import snapshot. A founder-scale CRM fits comfortably in KV,
-keeps reads to single keys, and makes export/import exact.
+Everything lives in PocketBase (SQLite), one table per collection:
+`crm_settings`, `crm_companies`, `crm_contacts`, `crm_deals`,
+`crm_activities`, `crm_tasks`, `crm_templates`, `crm_attachments`,
+`crm_trash`, `crm_backup`, `crm_kv`, plus `crm_teams`,
+`crm_team_members`, `crm_comments`.
 
-Each collection is also mirrored to IndexedDB (`src/lib/outbox.js`): that
-copy is what an offline cold start reads, and the queue beside it holds any
-write KV hasn't taken yet, with the value KV last had so a replay can tell
-"nothing changed" from "another device wrote".
+Each collection is also mirrored to IndexedDB (`src/lib/outbox.js`):
+that copy is what an offline cold start reads, and the queue beside it
+holds any write the server hasn't taken yet, with the value the server
+last had so a replay can tell "nothing changed" from "another device
+wrote".
 
 ## License
 
-This repository, including all its contents, sub-projects, modules, and components, is licensed under [MIT](../../LICENSE) unless explicitly stated otherwise. Third-party libraries included in this repository may be subject to their own licenses.
+MIT
