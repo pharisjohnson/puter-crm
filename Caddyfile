@@ -1,5 +1,5 @@
-# Local development - HTTP only
-http://localhost {
+# Production with custom domain - auto HTTPS via Let's Encrypt
+crm.noonstudio.africa {
     root * /var/www/html
 
     # 1. Proxy API to PocketBase (first - highest priority)
